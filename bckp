@@ -1,0 +1,279 @@
+#!/bin/bash
+# Author           : Kamil Królikowski ( kamil-krolikowski@outlook.com )
+# Created On       : 11.06.2017
+# Last Modified By : Kamil Królikowski ( kamil-krolikowski@outlook.com )
+# Last Modified On : 12.06.2017 
+# Version          : 0.2
+#
+# Description      : Simple script for performing backup, sync, archiving actions
+# Opis
+#
+# Licensed under GPL (see /usr/share/common-licenses/GPL for more details
+# or contact # the Free Software Foundation for a copy)
+
+
+# TODO: remove first lines with dirs itself -> its not necessary to try to copy them
+VERSION="0.2"
+
+function print_version()
+{
+    echo "bckp version: $VERSION"
+}
+
+function print_verbose_message()
+{
+    if [ "$VERBOSE" = true ] 
+    then
+        echo $1
+    fi
+}
+
+function print_usage()
+{
+    printf "Usage:\n"
+    printf "%-3s %-15s %s\n" -s --src "Specify source"
+    printf "%-3s %-15s %s\n" -d --dest "Specify destination"
+    printf "%-3s %-15s %s\n" -m --mirror "Mirror backup mode (default)"
+    printf "%-3s %-15s %s\n" -i --incremental "Incremental backup mode"
+    printf "%-3s %-15s %s\n" -v --version "Version"
+    printf "%-3s %-15s %s\n" -h --help "Help"
+    printf "%-3s %-15s %s\n" -V --verbose "Verbose mode"
+    printf "%-3s %-15s %s\n" -t --tar "In specified destination tar archive with backup will be created/updated"
+    printf "%-3s %-15s %s\n" -e --encrypt "Outcome tar archive will be encrypted with given password"
+    printf "%-3s %-15s %s\n" -a --accurate "Files are compared by content instead of name, size and last modifying date"
+    printf "%-3s %-15s %s\n" -c --copy "Simple copy/archive files without comparison"
+
+    
+
+}
+function compare_files() # params: file1 file2
+{
+    local file1=$1
+    local file2=$2
+    local file1_name=$(basename "$file1")
+    local file2_name=$(basename "$file2")
+
+    # echo $file1_name $file2_name
+
+    if [ "$file1_name" != "$file2_name" ];then
+        echo false # "diff name"
+        return 0
+    fi
+    local file1_size=$(stat -c %s "$file1")
+    local file2_size=$(stat -c %s "$file2")
+
+    if [ "$file1_size" != "$file2_size" ];then
+        echo false # "diff size"
+        return 0
+    fi
+
+    local file1_mod_date=$(stat -c %Y "$file1")
+    local file2_mod_date=$(stat -c %Y "$file2")
+
+    if [ "$file1_mod_date" != "$file2_mod_date" ];then
+        echo false # "diff mod"
+        return 0
+    fi
+
+    if [ "$ACCURATE_MODE" != true ];then
+        echo true # "acc_mode_off -> files are equal"
+        return 0
+    else
+        local file1_md5sum=$(md5sum "$file1" | awk '{print $1}')
+        local file2_md5sum=$(md5sum "$file2" | awk '{print $1}')
+
+        if [ "$file1_md5sum" = "$file2_md5sum" ];then
+             echo true # "sum right"
+        else
+             echo false # "sum bad"
+        
+        fi
+        return 0
+    fi
+}
+
+function perform_mirror_backup() # params: src_path dest_path
+{
+    local src_path=$1
+    local dest_path=$2
+    print_verbose_message "Sync between:"
+    print_verbose_message "$src_path"
+    print_verbose_message "$dest_path"
+    if [ ! -d "$src_path" ];then
+        print_verbose_message "Source directory does not exist. It will be created"
+        mkdir "$src_path"
+    fi
+    if [ ! -d "$dest_path" ];then
+        print_verbose_message "Destination directory does not exist. It will be created"
+        mkdir "$dest_path"
+    fi
+    local dest_files_list_tmp_file="/tmp/bckp_dest.$$"
+    local src_files_list_tmp_file="/tmp/bckp_src.$$"
+    # local diff_tmp_file="/tmp/bckp_diff.$$"
+    cd "$src_path" && find . >> "$src_files_list_tmp_file"
+    cd "$dest_path" && find . >> "$dest_files_list_tmp_file"
+    sort "$dest_files_list_tmp_file" -o "$dest_files_list_tmp_file"
+    sort "$src_files_list_tmp_file" -o "$src_files_list_tmp_file"
+    print_verbose_message "Source dir files:"
+    cat $src_files_list_tmp_file
+    print_verbose_message "Dest dir files:"
+    cat $dest_files_list_tmp_file
+    print_verbose_message "Diff:"
+    oIFS="$IFS"
+    IFS=$'\n'
+    files_to_delete=$(comm "$src_files_list_tmp_file" "$dest_files_list_tmp_file" -1 -3)
+    files_to_copy=$(comm "$src_files_list_tmp_file" "$dest_files_list_tmp_file" -2 -3)
+    files_to_compare=$(comm "$src_files_list_tmp_file" "$dest_files_list_tmp_file" -1 -2)
+    for file in $files_to_delete
+    do
+        cd "$dest_path" && rm "$file"
+    done
+
+    for file in $files_to_copy
+    do
+        cp "$src_path/$file" "$dest_path/$file" --preserve=timestamps 2> /dev/null
+    done
+
+    for file in $files_to_compare
+    do
+        if [ $(compare_files "$src_path/$file" "$dest_path/$file") = "false" ];then
+            print_verbose_message "File is different. Copying: $file"
+            cp "$src_path/$file" "$dest_path/$file" --preserve=timestamps 2> /dev/null
+        else
+            print_verbose_message "File in backup is identical. Ignoring: $file"
+        fi
+    done
+    
+
+    IFS="$oIFS"
+
+
+
+
+    rm "$dest_files_list_tmp_file"
+    rm "$src_files_list_tmp_file"
+}
+
+SOURCE_PATH=''
+DESTINATION_PATH=''
+BACKUP_MODE='mirror'
+ARCHIVE_MODE=false
+ACCURATE_MODE=false
+ENCRYPT=false
+VERBOSE=false
+function main()
+{
+    echo "Welcome to bckp program!"
+}
+ARGS=$(getopt -n "$0" -o hvVMis:d:acm --long "help, version, mirror, incremental,src:, dest:, verbose, tar, encrypt, accurate, copy" -- "$@")
+
+if [ $? -ne 0 ] 
+then
+    echo "Something went wrong, sorry!"
+    print_usage
+    exit 1
+fi
+
+# if [ $# -eq 0 ] 
+# then
+#     main
+#     exit 0
+# fi
+
+eval set -- "$ARGS"
+
+while true 
+do
+    case "$1" in
+        -s|--src)
+            SOURCE_PATH="$2"
+            shift 2
+            ;;
+        -d|--dest)
+            DESTINATION_PATH="$2"
+            shift 2
+            ;;
+        -m|--mirror)
+            BACKUP_MODE="mirror"
+            shift
+            ;;
+        -i|--incremental)
+            BACKUP_MODE="incremental"
+            shift
+            ;;
+        -v|--version)
+            print_version
+            exit 0
+            ;;
+        -h|--help)
+            print_help
+            exit 0
+            ;;
+        -V|--verbose)
+            VERBOSE=true
+            shift
+            ;;
+        -t|--tar)
+            ARCHIVE_MODE=true
+            shift
+            ;;
+        -e|--encrypt)
+            ENCRYPT=true
+            shift
+            ;;
+        -a|--accurate)
+            ACCURATE_MODE=true
+            shift
+            ;;
+        -c|--copy)
+            BACKUP_MODE="copy"
+            shift
+            ;;
+        --)
+            shift;break;;
+    esac
+    
+done
+
+if [ "$SOURCE_PATH" == "" ] 
+then
+    echo "You must specify source path"
+    print_usage
+    exit 1
+fi
+
+if [ "$DESTINATION_PATH" == "" ] 
+then
+    echo "You must specify destination path"
+    print_usage
+    exit 1
+fi
+if [ "$VERBOSE" = true ] 
+then
+    echo "Selected backup settings:"
+    echo "SOURCE_PATH = $SOURCE_PATH"
+    echo "DESTINATION_PATH = $DESTINATION_PATH"
+    echo "BACKUP_MODE = $BACKUP_MODE"
+    echo "ARCHIVE_MODE = $ARCHIVE_MODE"
+    echo "ACCURATE_MODE = $ACCURATE_MODE"
+    echo "ENCRYPT = $ENCRYPT"
+    echo "VERBOSE_MODE = $VERBOSE"
+fi
+if [ "$ARCHIVE_MODE" = true ]                                               # archive mode
+then
+    echo "Archive mode"
+else                                                                        # normal mode
+    if [ "$BACKUP_MODE" = "copy" ]
+    then                                                                        # copy mode
+        print_verbose_message "Copy mode selected. Starting copy operation"
+        rm -Rf "$DESTINATION_PATH"
+        cp -R "$SOURCE_PATH" "$DESTINATION_PATH"
+        print_verbose_message "Copying operation finished successful"
+        exit 0
+    elif [ "$BACKUP_MODE" = mirror ]
+    then                                                                        # mirror mode
+        print_verbose_message "Mirror backup selected. Starting operation"
+        perform_mirror_backup "$SOURCE_PATH" "$DESTINATION_PATH"
+        
+    fi
+fi
