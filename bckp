@@ -2,8 +2,8 @@
 # Author           : Kamil Królikowski ( kamil-krolikowski@outlook.com )
 # Created On       : 11.06.2017
 # Last Modified By : Kamil Królikowski ( kamil-krolikowski@outlook.com )
-# Last Modified On : 12.06.2017 
-# Version          : 0.2
+# Last Modified On : 13.06.2017 
+# Version          : 0.5
 #
 # Description      : Simple script for performing backup, sync, archiving actions
 # Opis
@@ -17,7 +17,7 @@
 # TODO: GTFO name comparison -> it useless DONE
 # TODO: add incremetal bckp function
 # TODO: maybe change files comparison order (md5 before size/mad date)???
-VERSION="0.2"
+VERSION="0.5"
 
 function print_version()
 {
