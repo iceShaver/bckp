@@ -12,9 +12,9 @@
 # or contact # the Free Software Foundation for a copy)
 
 
-# TODO: remove first lines with dirs itself -> its not necessary to try to copy them
+# TODO: remove first lines with dirs itself -> its not necessary to try to copy them DONE
 # TODO: check if comparison is correct
-# TODO: GTFO name comparison -> it useless
+# TODO: GTFO name comparison -> it useless DONE
 # TODO: add incremetal bckp function
 # TODO: maybe change files comparison order (md5 before size/mad date)???
 VERSION="0.2"
@@ -50,19 +50,30 @@ function print_usage()
     
 
 }
+
+function print_stats()
+{
+    print_verbose_message "$files_created created, $files_updated updated, $files_ignored ignored, $files_removed removed"
+}
+
 function compare_files() # params: file1 file2
 {
     local file1=$1
     local file2=$2
-    local file1_name=$(basename "$file1")
-    local file2_name=$(basename "$file2")
 
-    # echo $file1_name $file2_name
 
-    if [ "$file1_name" != "$file2_name" ];then
-        echo false # "diff name"
-        return 0
-    fi
+    #                                           this operation had no sense
+    # local file1_name=$(basename "$file1")
+    # local file2_name=$(basename "$file2")
+
+    # # echo $file1_name $file2_name
+
+    # if [ "$file1_name" != "$file2_name" ];then
+    #     echo false # "diff name"
+    #     return 0
+    # fi
+
+
     local file1_size=$(stat -c %s "$file1")
     local file2_size=$(stat -c %s "$file2")
 
@@ -98,6 +109,7 @@ function compare_files() # params: file1 file2
 
 function perform_mirror_backup() # params: src_path dest_path
 {
+    print_verbose_message "Starting mirror backup"    
     local src_path=$1
     local dest_path=$2
     print_verbose_message "Sync between:"
@@ -125,26 +137,51 @@ function perform_mirror_backup() # params: src_path dest_path
     print_verbose_message "Diff:"
     oIFS="$IFS"
     IFS=$'\n'
-    files_to_delete=$(comm "$src_files_list_tmp_file" "$dest_files_list_tmp_file" -1 -3)
-    files_to_copy=$(comm "$src_files_list_tmp_file" "$dest_files_list_tmp_file" -2 -3)
-    files_to_compare=$(comm "$src_files_list_tmp_file" "$dest_files_list_tmp_file" -1 -2)
+    local files_to_delete=$(comm "$src_files_list_tmp_file" "$dest_files_list_tmp_file" -1 -3)
+    local files_to_copy=$(comm "$src_files_list_tmp_file" "$dest_files_list_tmp_file" -2 -3)
+    local files_to_compare=$(comm "$src_files_list_tmp_file" "$dest_files_list_tmp_file" -1 -2)
+    local dirs_to_delete
     for file in $files_to_delete
     do
-        cd "$dest_path" && rm "$file"
+        if [ -f "$dest_path/$file" ];then
+            print_verbose_message "Removing file: $dest_path/$file"
+            cd "$dest_path" && rm "$file"
+            let files_removed++
+        elif [ -d "$dest_path/$file" ];then
+            dirs_to_delete+=$file
+        fi
     done
-
+    for directory in $dirs_to_delete
+    do
+        print_verbose_message "Removing dir: $dest_path/$file"        
+        cd "$dest_path" && rmdir $directory
+        let files_removed++
+    done
+    
     for file in $files_to_copy
     do
-        cp "$src_path/$file" "$dest_path/$file" --preserve=timestamps 2> /dev/null
+        if [ -d "$src_path/$file" ];then
+            print_verbose_message "Creating dir: $dest_path/$file"
+            mkdir "$dest_path/$file" # 2> /dev/null
+            let files_created++
+        elif [ -f "$src_path/$file" ];then
+            print_verbose_message "Creating file: $dest_path/$file"
+            cp -R "$src_path/$file" "$dest_path/$file" --preserve=timestamps # 2> /dev/null
+            let files_created++
+        fi
+        
     done
 
     for file in $files_to_compare
     do
+        if [ "$file" = "." -o -d "$src_path/$file" ];then continue;fi
         if [ $(compare_files "$src_path/$file" "$dest_path/$file") = "false" ];then
-            print_verbose_message "File is different. Copying: $file"
-            cp "$src_path/$file" "$dest_path/$file" --preserve=timestamps 2> /dev/null
+            print_verbose_message "Updating: $dest_path/$file"
+            cp "$src_path/$file" "$dest_path/$file" --preserve=timestamps # 2> /dev/null
+            let files_updated++
         else
-            print_verbose_message "File in backup is identical. Ignoring: $file"
+            print_verbose_message "Ignoring: $dest_path/$file"
+            let files_ignored++
         fi
     done
     
@@ -165,6 +202,10 @@ ARCHIVE_MODE=false
 ACCURATE_MODE=false
 ENCRYPT=false
 VERBOSE=false
+files_updated=0
+files_removed=0
+files_ignored=0
+files_created=0
 function main()
 {
     echo "Welcome to bckp program!"
@@ -270,14 +311,14 @@ else                                                                        # no
     if [ "$BACKUP_MODE" = "copy" ]
     then                                                                        # copy mode
         print_verbose_message "Copy mode selected. Starting copy operation"
-        rm -Rf "$DESTINATION_PATH"
+        # rm -Rf "$DESTINATION_PATH"
         cp -R "$SOURCE_PATH" "$DESTINATION_PATH"
         print_verbose_message "Copying operation finished successful"
         exit 0
     elif [ "$BACKUP_MODE" = mirror ]
     then                                                                        # mirror mode
-        print_verbose_message "Mirror backup selected. Starting operation"
         perform_mirror_backup "$SOURCE_PATH" "$DESTINATION_PATH"
-        
+        print_verbose_message "Mirror backup finished!"
+        print_stats
     fi
 fi
